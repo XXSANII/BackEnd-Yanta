@@ -1,0 +1,6 @@
+@YantaBackEnd_HostAddress = http://localhost:5128
+
+GET {{YantaBackEnd_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
