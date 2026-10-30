@@ -1,9 +1,12 @@
 using Dapper;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using System.Text;
 using YantaBackEnd.Authorization;
 using YantaBackEnd.Data;
+using YantaBackEnd.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -12,71 +15,80 @@ builder.Services.AddOpenApi();
 
 builder.Services.AddSingleton<DapperContext>();
 
-const string supabaseIssuer =
-    "https://rwpoygtafyxnunazzisl.supabase.co/auth/v1";
+// 1. อ่านค่า Supabase จาก configuration (appsettings / User Secrets / Env)
+builder.Services
+    .AddOptions<SupabaseOptions>()
+    .Bind(builder.Configuration.GetSection(SupabaseOptions.SectionName))
+    .Validate(
+        o => Uri.TryCreate(o.Url, UriKind.Absolute, out _),
+        "Supabase:Url must be an absolute URL.")
+    .ValidateOnStart();
 
-// 1. Authentication: ตรวจสอบ JWT จาก Supabase
+// 2. Authentication: ตรวจสอบ JWT จาก Supabase
+//    - Asymmetric (ES256/RS256): ดึง public key จาก JWKS ผ่าน Authority อัตโนมัติ
+//    - Legacy HS256: ใช้ Supabase:JwtSecret ถ้ามีการตั้งค่าไว้
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
-    {
-        options.Authority = supabaseIssuer;
+    .AddJwtBearer();
 
-        options.TokenValidationParameters = new TokenValidationParameters
+builder.Services
+    .AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
+    .Configure<IOptions<SupabaseOptions>, IWebHostEnvironment>(
+        (options, supabaseOptions, env) =>
         {
-            ValidateIssuer = true,
-            ValidIssuer = supabaseIssuer,
+            var supabase = supabaseOptions.Value;
 
-            ValidateAudience = true,
-            ValidAudience = "authenticated",
+            options.Authority = supabase.Issuer;
+            options.RequireHttpsMetadata = !env.IsDevelopment();
 
-            ValidateLifetime = true,
-            RequireExpirationTime = true,
-            RequireSignedTokens = true,
+            // อ่าน claim ชื่อเดิม เช่น "sub" ไม่ถูกแปลงเป็น ClaimTypes.*
+            options.MapInboundClaims = false;
 
-            ValidateIssuerSigningKey = true
-        };
-    });
-
-// 2. รายการ Permission ที่มีใน Database
-var permissions = new[]
-{
-    "menu.manage",
-    "menu.view",
-    "order.create",
-    "order.update_status",
-    "order.view",
-    "payment.confirm",
-    "payment.view",
-    "report.view",
-    "session.close",
-    "session.open",
-    "session.view",
-    "settings.manage",
-    "staff.manage",
-    "staff.view",
-    "table.manage",
-    "table.view"
-};
-
-// 3. Authorization: สร้าง Policy แยกตาม Permission
-builder.Services.AddAuthorization(options =>
-{
-    foreach (var permission in permissions)
-    {
-        options.AddPolicy(
-            $"Permission:{permission}",
-            policy =>
+            var parameters = new TokenValidationParameters
             {
-                policy.RequireAuthenticatedUser();
+                ValidateIssuer = true,
+                ValidIssuer = supabase.Issuer,
 
-                policy.AddRequirements(
-                    new PermissionRequirement(permission));
-            });
-    }
-});
+                ValidateAudience = true,
+                ValidAudience = supabase.Audience,
 
-// 4. ลงทะเบียน Handler สำหรับตรวจสอบ Permission ใน PostgreSQL
+                ValidateLifetime = true,
+                RequireExpirationTime = true,
+                RequireSignedTokens = true,
+                ClockSkew = TimeSpan.FromSeconds(30),
+
+                ValidateIssuerSigningKey = true
+            };
+
+            if (!string.IsNullOrWhiteSpace(supabase.JwtSecret))
+            {
+                // Legacy JWT secret (HS256) — จำกัด algorithm ให้ตรงกัน
+                parameters.IssuerSigningKey = new SymmetricSecurityKey(
+                    Encoding.UTF8.GetBytes(supabase.JwtSecret));
+                parameters.ValidAlgorithms = [SecurityAlgorithms.HmacSha256];
+            }
+            else
+            {
+                // Signing keys แบบใหม่ — ระบุ algorithm ที่ยอมรับ
+                parameters.ValidAlgorithms =
+                [
+                    SecurityAlgorithms.EcdsaSha256,
+                    SecurityAlgorithms.RsaSha256
+                ];
+            }
+
+            options.TokenValidationParameters = parameters;
+        });
+
+// 3. Authorization: Policy "Permission:xxx" ถูกสร้างแบบ dynamic
+//    ใช้ [HasPermission("menu.view")] ที่ Controller ได้เลย
+builder.Services.AddSingleton<
+    IAuthorizationPolicyProvider,
+    PermissionPolicyProvider>();
+
+builder.Services.AddAuthorization();
+
+// 4. Handler สำหรับตรวจสอบ Permission ใน PostgreSQL
 builder.Services.AddScoped<
     IAuthorizationHandler,
     PermissionAuthorizationHandler>();
@@ -84,7 +96,9 @@ builder.Services.AddScoped<
 var app = builder.Build();
 
 // Health check: ตรวจสอบการเชื่อมต่อ Database
-app.MapGet("/health/db", async (DapperContext db) =>
+app.MapGet("/health/db", async (
+    DapperContext db,
+    ILogger<Program> logger) =>
 {
     try
     {
@@ -98,8 +112,10 @@ app.MapGet("/health/db", async (DapperContext db) =>
             database = result == 1 ? "connected" : "unknown"
         });
     }
-    catch (Exception)
+    catch (Exception ex)
     {
+        logger.LogError(ex, "Database health check failed");
+
         return Results.Problem(
             title: "Database connection failed",
             statusCode: StatusCodes.Status503ServiceUnavailable);

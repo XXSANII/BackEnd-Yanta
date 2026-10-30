@@ -10,10 +10,11 @@
 using System;
 using System.Reflection;
 
+[assembly: Microsoft.Extensions.Configuration.UserSecrets.UserSecretsIdAttribute("11da5b3c-2366-47b8-be73-40a8776d2f8d")]
 [assembly: System.Reflection.AssemblyCompanyAttribute("YantaBackEnd")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+d4396be10da0c4e618ed70982e08008ca6315580")]
 [assembly: System.Reflection.AssemblyProductAttribute("YantaBackEnd")]
 [assembly: System.Reflection.AssemblyTitleAttribute("YantaBackEnd")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

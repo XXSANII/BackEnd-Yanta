@@ -1,5 +1,5 @@
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using YantaBackEnd.Authorization;
 
 namespace YantaBackEnd.Controllers;
 
@@ -9,7 +9,7 @@ public class AuthorizationTestController : ControllerBase
 {
     // GET: ทดสอบสิทธิ์ดูเมนู
     [HttpGet("menu")]
-    [Authorize(Policy = "Permission:menu.view")]
+    [HasPermission("menu.view")]
     public IActionResult TestMenuPermission(Guid storeId)
     {
         return Ok(new
@@ -24,7 +24,7 @@ public class AuthorizationTestController : ControllerBase
 
     // POST: ทดสอบสิทธิ์จัดการเมนู
     [HttpPost("menu")]
-    [Authorize(Policy = "Permission:menu.manage")]
+    [HasPermission("menu.manage")]
     public IActionResult TestManageMenu(Guid storeId)
     {
         return Ok(new

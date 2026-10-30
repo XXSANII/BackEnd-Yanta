@@ -41,3 +41,4 @@
 /Users/sanpon/Documents/Yanta/YantaBackEnd/bin/Debug/net10.0/Microsoft.IdentityModel.Protocols.OpenIdConnect.dll
 /Users/sanpon/Documents/Yanta/YantaBackEnd/bin/Debug/net10.0/Microsoft.IdentityModel.Tokens.dll
 /Users/sanpon/Documents/Yanta/YantaBackEnd/bin/Debug/net10.0/System.IdentityModel.Tokens.Jwt.dll
+/Users/sanpon/Documents/Yanta/YantaBackEnd/obj/Debug/net10.0/YantaBackEnd.sourcelink.json
