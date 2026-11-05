@@ -1,0 +1,14 @@
+bin/
+obj/
+.git/
+.agents/
+.claude/
+.mcp.json
+skills-lock.json
+postman/
+scripts/
+migrations/
+appsettings.Development.json
+*.md
+Dockerfile
+.dockerignore
