@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using Dapper;
 using Microsoft.AspNetCore.Authorization;
 using YantaBackEnd.Data;
@@ -23,38 +22,10 @@ public sealed class PermissionAuthorizationHandler
         AuthorizationHandlerContext context,
         PermissionRequirement requirement)
     {
-        // 1. อ่าน User ID จาก JWT ของ Supabase
+        // อ่าน User ID จาก JWT ของ Supabase
         var userIdValue = context.User.FindFirst("sub")?.Value;
 
         if (!Guid.TryParse(userIdValue, out var userId))
-        {
-            context.Fail();
-            return;
-        }
-
-        // 2. หา HttpContext เพื่ออ่าน storeId จาก Route
-        var httpContext = context.Resource as HttpContext;
-
-        if (httpContext is null)
-        {
-            // รองรับกรณี Resource เป็น AuthorizationFilterContext ด้วย
-            if (context.Resource is Microsoft.AspNetCore.Mvc.Filters
-                .AuthorizationFilterContext filterContext)
-            {
-                httpContext = filterContext.HttpContext;
-            }
-        }
-
-        if (httpContext is null)
-        {
-            context.Fail();
-            return;
-        }
-
-        // Endpoint ต้องมี route parameter ชื่อ storeId
-        var storeIdValue = httpContext.Request.RouteValues["storeId"]?.ToString();
-
-        if (!Guid.TryParse(storeIdValue, out var storeId))
         {
             context.Fail();
             return;
@@ -64,32 +35,29 @@ public sealed class PermissionAuthorizationHandler
         {
             using var connection = _db.CreateConnection();
 
+            // ร้านเดียว: admin ผ่านทุกสิทธิ์
+            // role อื่นใช้สิทธิ์ของ role และ member_permissions override รายคน
             const string sql = """
                 SELECT EXISTS (
                     SELECT 1
-                    FROM public.stores s
-                    WHERE s.id = @StoreId
-                      AND s.is_active = TRUE
+                    FROM public.store_members sm
+                    JOIN public.roles r
+                        ON r.id = sm.role_id
+                    LEFT JOIN public.permissions p
+                        ON p.code = @Permission
+                    LEFT JOIN public.member_permissions mp
+                        ON mp.store_member_id = sm.id
+                       AND mp.permission_id = p.id
+                    LEFT JOIN public.role_permissions rp
+                        ON rp.role_id = r.id
+                       AND rp.permission_id = p.id
+                    WHERE sm.user_id = @UserId
+                      AND sm.is_active = TRUE
                       AND (
-                          -- เจ้าของร้านมีสิทธิ์จัดการร้านของตน
-                          s.owner_id = @UserId
-
-                          OR
-
-                          -- สมาชิกต้อง Active และมี Permission ตาม Role
-                          EXISTS (
-                              SELECT 1
-                              FROM public.store_members sm
-                              JOIN public.roles r
-                                  ON r.id = sm.role_id
-                              JOIN public.role_permissions rp
-                                  ON rp.role_id = r.id
-                              JOIN public.permissions p
-                                  ON p.id = rp.permission_id
-                              WHERE sm.store_id = s.id
-                                AND sm.user_id = @UserId
-                                AND sm.is_active = TRUE
-                                AND p.code = @Permission
+                          r.name = 'admin'
+                          OR (
+                              p.id IS NOT NULL
+                              AND COALESCE(mp.is_allowed, rp.permission_id IS NOT NULL)
                           )
                       )
                 );
@@ -99,7 +67,6 @@ public sealed class PermissionAuthorizationHandler
                 sql,
                 new
                 {
-                    StoreId = storeId,
                     UserId = userId,
                     Permission = requirement.Permission
                 });
@@ -118,9 +85,8 @@ public sealed class PermissionAuthorizationHandler
             // Fail closed: หากฐานข้อมูลมีปัญหา ต้องไม่ให้ผ่านสิทธิ์
             _logger.LogError(
                 ex,
-                "Permission check failed for user {UserId}, store {StoreId}, permission {Permission}",
+                "Permission check failed for user {UserId}, permission {Permission}",
                 userId,
-                storeId,
                 requirement.Permission);
 
             context.Fail();
